@@ -1,0 +1,125 @@
+\documentclass[11pt,twocolumn]{article}
+
+\usepackage{graphicx} 
+\usepackage{amssymb} 
+\usepackage{array} 
+\usepackage{fancyhdr} 
+\pagestyle{fancy} 
+\fancyhead{} 
+\renewcommand{\headrulewidth}{0pt}
+
+\fancyfoot{} 
+\lfoot{\footnotesize \textit{A Very Simple Monitor Daemon - draft}: \thepage} 
+\textwidth = 6.5 in \textheight = 9 in 
+\oddsidemargin = 0.0 in 
+\evensidemargin = 0.0 in 
+\topmargin = 0.0 in 
+\headheight = 0.0 in 
+\headsep = 0.0 in 
+\parskip = 0.1in 
+\parindent = 0.0in
+
+\bibliographystyle{unsrt}
+
+\def\journaldata#1#2#3#4{{\it #1} {\bf #2:} #3 (#4)}
+
+\def\eprint#1{$\langle$#1\hbox{$\rangle$}}
+
+\begin{document}
+
+\title{A Very Simple and Extensible Monitor Daemon (draft)} 
+\author{Brett D. Estrade}
+
+% \date{}
+
+\normalsize
+
+\setcounter{page}{1}
+
+\maketitle
+
+\begin{abstract}
+This document describes a very simple event detection daemon and the means by which it may be extended.  The system is composed of two scripts. One script watches a \textit{spool} directory for messages in the form of text files.  The other script is used to extract information from the message file.
+\end{abstract}
+
+\section{Introduction}
+\label{sec-intro}
+
+The needs of recent efforts to create a distributed storm surge forecasting model for Lake Pontchartrain in New Orleans \footnote{http://www.cct.lsu.edu/projects/LPFS} and for Louisiana's Gulf Coast \footnote{http://www.hpc.lsu.edu/projects/AFS} using the ADCIRC finite element coastal ocean model \footnote{http://www.adcirc.org}.  
+
+In order to maximize efficient utilization of all available resources, a capability to run various pieces on different resources was desired. Because of this, writing the system in a concurrent, event based paradigm was the direction taken.
+
+An event detection and handling scheme was implemented using a shell script based daemon that monitored a \textit{spool} directory for message files.  Message file types were denoted by their extension, and information was communicated in the body of the message. 
+
+\section{The Monitor Daemon}
+\label{sec-daemon}
+
+The daemon is very simple in design, which allows functionality to be added easily.  When a message is detected in the spool directory, the daemon tries to recognize the file extension.  If configured to recognize this particular extension, the daemon calls a dispatch function that then passes on full path location of the file to the appropriate handler function. Once the daemon is returned the flow control by the handler function, the message file is deleted.  It them waits to detect another file.  If multiple files have accumulated in the meantime, there is no guarantee as in what order they will be detected.
+
+Files are detected and dispatch sequentially, but there is nothing stopping one to background a script that does the actual event handling in the handler function.  This quickly allows the daemon to get back to its job of detecting message files.
+
+If one wants to not be limited by this, then one may create multiple daemons that run concurrently.  Their spool directories must be disjoint, otherwise two daemons may detect the same message file at the same time.  This introduces \textit{non-determinism} into the system, and is therefore not good at all.
+
+\section{Message Passing}
+\label{sec-spool}
+
+The spool directory is checked at intervals specified in the script itself, and reacts immediately upon detection of a file.  The order in which files are detected is not guaranteed. Because files are acted upon once they are detected, it is possible that a message file will not be completely written when it is acted upon - this will obviously cause problems.
+
+The key is to place these message files into the spool directory using \textit{atomic} file system actions such as \textit{mv}.  Copying a file is not atomic, and if one simply copies a file directly into the spool directory, he runs the risk of having the system act upon an incomplete file.  The general procedure would be to copy file to a temporary location, then move it to the spool directory.  A file placed into the spool directory this way relies on the file system to ensure that the file in the directory is complete.
+
+It should not go with out mentioning that message files are intended to be created dynamically, but as long as a file ends up in the spool directory, it will be detected and a dispatch will be attempted. 
+
+\section{The Query Tool}
+\label{sec-daemon}
+
+The query tool is a Perl script that provides an easy way to extract information for the message file.  One particularly helpful feature of this script is that one may pass in a formatted string containing variable \textit{macros}.  The query script will find and replace the values of each corresponding piece of information in the message file, and will print out the formatted string with the actual values via \textit{standard out}.  This allows one to assign values to shell variables using data from the message file.
+
+The query tool offers a convenient way to read the information in the message files, and it greatly simplifies the contents of the monitor daemon.
+
+\section{Creating An Application}
+\label{sec-application}
+
+The functionality fulfilled by this monitor daemon is embodied by the need to run many, potentially concurrent and asynchronous tasks.  Instead of trying to manage each task explicitly, one establish a system of messages and triggers that manage the flow of the tasks concurrently. 
+
+\subsection{The Dispatch Function}
+\label{subsec-dispatch}
+
+The dispatch function looks at the extension of the file, and handles it if there is an entry in the dispatch function. It is good practice to offload the handling of the message file to a predefined function just to keep things well organized.
+
+The dispatch function consists of a \textit{case} statement that makes a match based on the extension of the message file. Using this paradigm, one may issue a message file to the spool directory in order to trigger the dispatching of a \textit{handler function}.
+
+The dispatch function should minimally pass in the name of the message file.
+
+\subsection{Handler Functions}
+\label{subsec-dispatch}
+
+Handler functions, given the name of the message file, extract values from the message file is necessary using the \textit{query tool}. Using this capability, one may extract the values, save them into variables, then use them to handle the event.
+
+A good practice is to create another script that is actually called by the handler function.  The query tool can be used to create a string of arguments to pass onto this script.  This also allows one to call a script and place it in the background - thus dispatching a \textit{non-blocking} action.  Communications from this script may be facilitated using another message file.
+
+\subsection{Blocking and Non-Blocking Handlers}
+\label{subsec-blocking}
+
+As mentioned in the latter part of Section \ref{subsec-dispatch}, events may be handled in a blocked or unblocked way.  The former prevents the monitor daemon from checking the spool directory while the latter dispatches some set of actions as a background process, allowing the monitor daemon to check the spool directory again.
+
+\subsection{Distributed Applications}
+\label{subsec-distributed}
+
+Network communications are not a part of this simple script, but there is nothing preventing a message file from being \textit{pushed} into a spool directory on a remote host using a file transfer utility such as \textit{scp}.  The key is to first transfer the file to a temporary location, then move it atomically into the spool directory.
+
+Designing a distributed application using this simple monitoring daemon is done as any other distributed application is.  One may think of all instances of the daemon running as a node in a connected graph, where the monitor script implements the \textit{state machine} that defines an action based on some sort of even (i.e., the receiving of a message).  All nodes in this connected graph may implement the same state machine, or it may implement a different one.  Using as few state machines as possible makes designing the distributed behavior much simpler, but there is no limit to the complexity one can implement using a set of monitor daemons. 
+
+\section{Application Security}
+\label{sec-security}
+
+Security is not included in this model simply because this is meant to run on a host as a regular process.  Messages are not filtered, no authentication or encryption of massages is performed either.  The motivating applications did not warrant this sort of interface, but because it is really just a shell script, it can be implemented fairly easily.  If your application requires strong security, either some customization or the investigating of other solutions is required. 
+
+\section{Conclusion}
+\label{sec-conclusion}
+
+This document outlines a very simple monitor daemon interface that serves as an event detection and handling dispatcher.  It facilitates a broad range of applications, and may be used to facilitate distributed, asynchronous tasks in an automated way.
+
+\bibliographystyle{latex8}
+\bibliography{lpfs-paradigm}
+
+\end{document}
