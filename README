@@ -1,2 +1,9 @@
 I need to blow the dust off of this thing; originally created to implement
 a hurricane forecasting system at LSU.
+
+This "daemon" runs as a background process and watches a particular spool
+directory for files.
+
+The contents of these files are used to direct the actions and parameters
+used for these actions by the daemon. A utility script written in Perl is
+utilized to get the parameters out of the spool file.
